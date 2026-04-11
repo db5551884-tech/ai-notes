@@ -1,7 +1,8 @@
 flask
-transformers
-torch
+gunicorn
+google-generativeai
+python-dotenv
 pdfplumber
+python-docx
 python-pptx
-reportlab
-PyPDF2
+reportlabі
