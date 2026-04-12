@@ -1,135 +1,172 @@
-from pptx import Presentation
-from reportlab.pdfgen import canvas
-from flask import send_file
+import os
 import io
+
+from flask import Flask, render_template, request, send_file
+from dotenv import load_dotenv
+
+import google.generativeai as genai
+
 import pdfplumber
-from flask import Flask, render_template, request
-import PyPDF2
-from transformers import pipeline
+from docx import Document
+from pptx import Presentation
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+
+# ========================
+# INIT
+# ========================
+
+load_dotenv()
+
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 app = Flask(__name__)
 
-# AI модель для конспекту
-summarizer = pipeline("text-generation", model="gpt2")
+lecture_text = ""
+
+
+# ========================
+# AI FUNCTIONS
+# ========================
 
 def summarize(text):
+    prompt = f"""
+Зроби:
 
-    if len(text) > 500:
-        text = text[:500]
+1. Короткий конспект у вигляді пунктів
+2. 5 тестових питань по тексту
 
-    result = summarizer(text, max_length=120, num_return_sequences=1)
+Текст:
+{text}
+"""
 
-    generated = result[0]["generated_text"]
+    response = model.generate_content(prompt)
+    return response.text.replace("\n", "<br>")
 
-    # розбиваємо текст на короткі пункти
-    sentences = generated.split(". ")
 
-    bullets = []
+def ask_ai(question, context):
+    prompt = f"""
+Відповідай на питання по тексту:
 
-    for s in sentences:
-        s = s.strip()
-        if len(s) > 5:
-            bullets.append("• " + s)
+{context}
 
-    return "<br>".join(bullets)
+Питання: {question}
+"""
 
-def extract_text_from_pdf(file):
-    reader = PyPDF2.PdfReader(file)
-    text = ""
+    response = model.generate_content(prompt)
+    return response.text
 
-    for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text += page_text
 
-    return text
+# ========================
+# FILE PROCESSING
+# ========================
 
-lecture_text = ""
+def extract_text(file):
+    filename = file.filename.lower()
+
+    if filename.endswith(".pdf"):
+        text = ""
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+        return text
+
+    elif filename.endswith(".docx"):
+        doc = Document(file)
+        return "\n".join([p.text for p in doc.paragraphs])
+
+    elif filename.endswith(".pptx"):
+        ppt = Presentation(file)
+        text = ""
+        for slide in ppt.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    text += shape.text + "\n"
+        return text
+
+    return ""
+
+
+# ========================
+# ROUTES
+# ========================
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     global lecture_text
 
     summary = ""
+    answer = ""
 
     if request.method == "POST":
-        print("BUTTON WORKS")
-
         text = request.form.get("text")
         file = request.files.get("file")
 
-        if file and file.filename.endswith(".pdf"):
-            import pdfplumber
-
-            with pdfplumber.open(file) as pdf:
-                pdf_text = ""
-
-                for page in pdf.pages:
-                    pdf_text += page.extract_text()
-
-            summary = summarize(pdf_text)
-            lecture_text = pdf_text
-
+        if file and file.filename != "":
+            lecture_text = extract_text(file)
+            summary = summarize(lecture_text)
 
         elif text:
-            summary = summarize(text)
             lecture_text = text
-        elif file and file.filename.endswith(".pptx"):
+            summary = summarize(text)
 
-            ppt = Presentation(file)
+    return render_template("index.html", summary=summary, answer=answer)
 
-            ppt_text = ""
 
-            for slide in ppt.slides:
-                for shape in slide.shapes:
-                 if hasattr(shape, "text"):
-                     ppt_text += shape.text + " "
-                
-            summary = summarize(ppt_text)
-            lecture_text = ppt_text
-    
-
-    return render_template("index.html", summary=summary)
-
-if __name__ == "__main__":
-    app.run(debug=True)
-@app.route("/download")
-def download():
-
-    summary = request.args.get("text")
-
-    buffer = io.BytesIO()
-
-    p = canvas.Canvas(buffer)
-
-    y = 800
-
-    for line in summary.split("<br>"):
-        p.drawString(50, y, line)
-        y -= 20
-
-    p.save()
-
-    buffer.seek(0)
-
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name="notes.pdf",
-        mimetype="application/pdf"
-    )
-    
 @app.route("/ask", methods=["POST"])
 def ask():
+    global lecture_text
 
     question = request.form.get("question")
 
-    context = lecture_text[:1000]
-
-    prompt = f"Answer the question based on this lecture:\n{context}\n\nQuestion: {question}"
-
-    result = summarizer(prompt, max_length=100, num_return_sequences=1)
-
-    answer = result[0]["generated_text"]
+    if lecture_text:
+        answer = ask_ai(question, lecture_text[:2000])
+    else:
+        answer = "Спочатку введи текст або завантаж файл"
 
     return render_template("index.html", summary="", answer=answer)
+
+
+# ========================
+# PDF DOWNLOAD
+# ========================
+
+def create_pdf(text):
+    buffer = io.BytesIO()
+
+    doc = SimpleDocTemplate(buffer)
+    styles = getSampleStyleSheet()
+
+    content = []
+
+    for line in text.split("<br>"):
+        content.append(Paragraph(line, styles["Normal"]))
+
+    doc.build(content)
+
+    buffer.seek(0)
+    return buffer
+
+
+@app.route("/download-pdf")
+def download_pdf():
+    summary = request.args.get("text")
+
+    pdf = create_pdf(summary)
+
+    return send_file(
+        pdf,
+        as_attachment=True,
+        download_name="summary.pdf",
+        mimetype="application/pdf"
+    )
+
+
+# ========================
+# RUN (Render friendly)
+# ========================
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
