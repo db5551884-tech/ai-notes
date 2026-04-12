@@ -36,9 +36,11 @@
 
 <form method="POST" action="/ask">
 
-<input type="text" name="question" class="form-control" placeholder="Наприклад: Яка головна тема лекції?">
-
 <button type="submit" class="btn btn-dark mt-2">Запитати AI</button>
+
+<input type="text" name="question" class="form-control" placeholder="Наприклад: Яка головна тема лекції?">
+<input type="file" name="file">
+
 
 </form>
 
@@ -47,6 +49,10 @@
 <b>Відповідь AI:</b>
 <p>{{ answer }}</p>
 </div>
+{% endif %}
+
+{% if summary %}
+<a href="/download?text={{ summary }}">Скачати PDF</a>
 {% endif %}
 
 <p>{{ summary | safe }}</p>
