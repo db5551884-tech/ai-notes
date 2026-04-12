@@ -31,6 +31,9 @@ lecture_text = ""
 # ========================
 
 def summarize(text):
+    if not text:
+        return "Немає тексту для аналізу"
+
     prompt = f"""
 Зроби:
 
@@ -151,7 +154,10 @@ def create_pdf(text):
 
 @app.route("/download-pdf")
 def download_pdf():
-    summary = request.args.get("text")
+    summary = request.args.get("text", "")
+
+    if not summary:
+        return "Немає тексту для PDF"
 
     pdf = create_pdf(summary)
 
