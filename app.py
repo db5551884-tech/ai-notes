@@ -34,31 +34,37 @@ def summarize(text):
     if not text:
         return "Немає тексту для аналізу"
 
-    prompt = f"""
+    try:
+        prompt = f"""
 Зроби:
 
 1. Короткий конспект у вигляді пунктів
 2. 5 тестових питань по тексту
 
 Текст:
-{text}
+{text[:3000]}
 """
+        response = model.generate_content(prompt)
+        return response.text.replace("\n", "<br>")
 
-    response = model.generate_content(prompt)
-    return response.text.replace("\n", "<br>")
+    except Exception as e:
+        return f"Помилка AI: {str(e)}"
 
 
 def ask_ai(question, context):
-    prompt = f"""
+    try:
+        prompt = f"""
 Відповідай на питання по тексту:
 
-{context}
+{context[:2000]}
 
 Питання: {question}
 """
+        response = model.generate_content(prompt)
+        return response.text
 
-    response = model.generate_content(prompt)
-    return response.text
+    except Exception as e:
+        return f"Помилка AI: {str(e)}"
 
 
 # ========================
